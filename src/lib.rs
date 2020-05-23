@@ -5,13 +5,29 @@ use log::*;
 use nix::sys::ptrace;
 use nix::sys::wait::waitpid;
 use nix::unistd::Pid;
+use nix::sys::uio::{IoVec, RemoteIoVec, process_vm_readv};
 
 use crate::errors::*;
 
 /// Replacement for nanosleep(2).
 /// Prototype: int nanosleep(const struct timespec *req, struct timespec *rem);
-fn nanosleep_hook(regs: user_regs_struct) -> Result<user_regs_struct> {
-    Ok(regs)
+fn nanosleep_hook(pid: Pid, regs: &mut user_regs_struct) -> Result<()> {
+    let mut buf = [0u8; std::mem::size_of::<libc::timespec>()];
+    let remote_iov = RemoteIoVec {
+                        base: regs.rdi as usize,
+                        len: std::mem::size_of::<libc::timespec>()
+                    };
+    debug!("nanosleep arg 1: {:x}", regs.rdi);
+    let ret = process_vm_readv(pid,
+                               &[IoVec::from_mut_slice(&mut buf)],
+                               &[remote_iov])?;
+    debug!("readv ret: {}", ret);
+    let s = buf.as_ptr() as *mut libc::timespec;
+
+    unsafe {
+        debug!("nanosleep called for {} seconds and {} nanoseconds", (*s).tv_sec, (*s).tv_nsec);
+    }
+    Ok(())
 }
 
 pub fn trace_read(pid: Pid) -> Result<()> {
@@ -56,9 +72,12 @@ fn sysint(pid: Pid) -> Result<()> {
     loop {
         ptrace::syscall(pid, None)?;
         waitpid(pid, None)?;
-        let regs = ptrace::getregs(pid)?;
+        let mut regs = ptrace::getregs(pid)?;
 
         debug!("Syscall: {}", regs.orig_rax);
+        if regs.orig_rax == 35 {
+            nanosleep_hook(pid, &mut regs)?;
+        }
 
         ptrace::syscall(pid, None)?;
         waitpid(pid, None)?;
@@ -66,8 +85,6 @@ fn sysint(pid: Pid) -> Result<()> {
         let regs = ptrace::getregs(pid)?;
         debug!("Syscall ret: {}", regs.rax);
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
