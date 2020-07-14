@@ -92,6 +92,17 @@ fn socket_hook(pid: Pid, regs: &mut user_regs_struct) -> Result<()> {
     Ok(())
 }
 
+/// Hook for read(2).
+///
+/// ssize_t read(int fd, void *buf, size_t count);
+fn read_hook(pid: Pid, regs: &mut user_regs_struct) -> Result<()> {
+    debug!("read arg 1: 0x{:x}", regs.rdi);
+    debug!("read arg 2: 0x{:x}", regs.rsi);
+    debug!("read arg 3: 0x{:x}", regs.rdx);
+
+    Ok(())
+}
+
 /// Hook for openat(2).
 ///
 /// int openat(int dirfd, const char *pathname, int flags);
@@ -99,6 +110,17 @@ fn openat_hook(pid: Pid, regs: &mut user_regs_struct) -> Result<()> {
     debug!("openat arg 1: 0x{:x}", regs.rdi);
     debug!("openat arg 2: 0x{:x}", regs.rsi);
     debug!("openat arg 3: 0x{:x}", regs.rdx);
+
+    Ok(())
+}
+
+/// Hook for write(2).
+///
+/// ssize_t write(int fd, const void *buf, size_t count);
+fn write_hook(pid: Pid, regs: &mut user_regs_struct) -> Result<()> {
+    debug!("write arg 1: 0x{:x}", regs.rdi);
+    debug!("write arg 2: 0x{:x}", regs.rsi);
+    debug!("write arg 3: 0x{:x}", regs.rdx);
 
     Ok(())
 }
@@ -119,6 +141,11 @@ fn sysint(pid: Pid) -> Result<()> {
             socket_hook(pid, &mut regs)?;
         } else if regs.orig_rax == 257 {
             openat_hook(pid, &mut regs)?;
+        } else if regs.orig_rax == 1 {
+            write_hook(pid, &mut regs)?;
+        } else if regs.orig_rax == 60 {
+            // Exit
+            return Ok(());
         }
 
         ptrace::syscall(pid, None)?;
